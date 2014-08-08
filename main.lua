@@ -2,14 +2,13 @@ require 'SICK'
 require 'helpers'
 Gamestate = require 'gamestate'
 
-SPEED = 1
-
-
 -- Size of a block
-SIZE = 30
-
 HEIGHT = 22
 WIDTH  = 10
+GRAVITY = true
+SPEED = 75 -- base speed  (actual depends on score)
+SIZE = 0   -- determined dynamically (in game:enter)
+DOWN-MOD = 5 -- speed modifier when down arrow is pressed
 
 local menu = {}
 local game = {}
@@ -48,7 +47,10 @@ function menu:keyreleased(key, code)
     end
 end
 
-function game:enter()   
+function game:enter()
+    SIZE = math.floor(math.max( love.graphics.getHeight()/(HEIGHT+2),
+                                love.graphics.getWidth() /(WIDTH+2)))
+
     score = 0
     field = {}
     just_collided = false
@@ -66,35 +68,26 @@ end
 
 dtotal = 0
 function game:update(dt)
-    floor_encountered = false
-
     dtotal = dtotal + dt
 
-    if dtotal > 1/SPEED then
-        dtotal = dtotal - 1/SPEED
+    if dtotal > 100/(SPEED+score) then
+        dtotal = dtotal - 100/(SPEED+score)
 
-        for _, i in pairs(active_block) do
-            if i[1] == HEIGHT or field[i[1]+1][i[2]] == 1 then
-                floor_encountered = true
-                break
-            end
+        local next_block = table.deepcopy(active_block)
+
+        for _, i in pairs(next_block) do
+             i[1] = i[1] + 1
         end
 
-        if floor_encountered then
+        if game:isColliding(next_block) then
             for _, i in pairs(active_block) do
                 field[i[1]][i[2]] = 1
             end
             game:spawn()
         else
-            for _, i in pairs(active_block) do
-                i[1] = i[1] + 1
-            end
+            active_block = next_block
             block_y = block_y + 1
         end
-    end
-
-    if love.keyboard.isDown('down') then
-        dtotal = dtotal + 1/SPEED
     end
 
     -- Check for full rows
@@ -111,19 +104,21 @@ function game:destroy(y)
         field[y][x] = 0
     end
 
-    score = score + 1
-
-    for y=y, 2, -1 do
-        for x=1, WIDTH do
-            field[y][x] = field[y-1][x]
+    if GRAVITY then
+        for y=y, 2, -1 do
+            for x=1, WIDTH do
+                field[y][x] = field[y-1][x]
+            end
         end
     end
+
+    score = score + 1
 end
 
 function game:isColliding(block)
     for _, i in ipairs(block) do
-        if field[i[1]][i[2]] == 1 or
-           i[2] >= WIDTH + 1 or i[2] <= 0 then
+        if i[1] > HEIGHT or field[i[1]][i[2]] == 1 or
+           i[2] > WIDTH or i[2] <= 0 then
             just_collided = true
             break
         end
@@ -175,7 +170,9 @@ function game:rotate(active_block)
 end
 
 function game:keypressed(key, code)
-    if key == 'right' then
+    if key == 'down' then
+        SPEED = SPEED * DOWN-MOD
+    elseif key == 'right' then
         game:move(1, 0)
     elseif key == 'left' then
         game:move(-1, 0)
@@ -188,6 +185,12 @@ function game:keypressed(key, code)
 
         -- DEBUG
         table.twoDprint(block)
+    end
+end
+
+function game:keyreleased(key, code)
+    if key == 'down' then
+        SPEED = SPEED / DOWN-MOD
     end
 end
 
