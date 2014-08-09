@@ -8,33 +8,31 @@ Timer = require 'timer'
 HEIGHT = 22
 WIDTH  = 10
 GRAVITY = true
-DROP_TIME = 0.5 -- is seconds. Very high values ignored
+DROP_TIME = 0.5 -- in seconds. Very high values ignored
 DOWN_SENS = 25
 
 local menu = {}
 local game = {}
 
 -- Each block must be non-empty square
-blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-          {{1, 0, 0}, {1, 1, 1}, {0, 0, 0}},
-          {{0, 0, 1}, {1, 1, 1}, {0, 0, 0}},
-          {{1, 1}, {1, 1}},
-          {{0, 1, 1}, {1, 1, 0}, {0, 0, 0}},
-          {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}},
-          {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}}}
+blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}, color={0, 255, 255}},
+          {{1, 0, 0}, {1, 1, 1}, {0, 0, 0}, color={0, 0, 255}},
+          {{0, 0, 1}, {1, 1, 1}, {0, 0, 0}, color={255, 127, 0}},
+          {{1, 1}, {1, 1}, color={255, 255, 0}},
+          {{0, 1, 1}, {1, 1, 0}, {0, 0, 0}, color={0, 255, 0}},
+          {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}, color={127, 0, 255}},
+          {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}, color={255, 0, 0}}}
 
 -- blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}}}
 
-levels = {{speed = 1, score_needed = 0}}
+levels = {}
 
-
-for i=1.5, 15.5, 0.5 do
-    table.insert(levels, {speed = i, score_needed = i * i * 120})
+for i=1, 15.5, 0.5 do
+    table.insert(levels, {speed = i, score_needed = (i-1) * i * 120})
 end
 
 function love.update(dt)
     TEsound.cleanup()
-    Timer.update(dt)
 end
 
 function love.load()
@@ -110,7 +108,7 @@ function game:update(dt)
         freeze_timer_running = false
         if move_result.collision then
             for _, i in ipairs(active_block) do
-                field[i[1]][i[2]] = 1
+                field[i[1]][i[2]] = active_block.color
             end
             TEsound.play('sounds/fall.wav')
 
@@ -179,7 +177,7 @@ end
 
 function game:isColliding(block)
     for _, i in ipairs(block) do
-        if i[1] > HEIGHT or field[i[1]][i[2]] == 1 or
+        if i[1] > HEIGHT or field[i[1]][i[2]] ~= 0 or
            i[2] > WIDTH or i[2] <= 0 then
             return true
         end
@@ -239,8 +237,12 @@ function game:spawn()
     active_block['x'] = 3
     active_block['y'] = 0
  
-    block = blocks[math.random(1, #blocks)]
+    block = next_block and next_block or blocks[math.random(1, #blocks)]
+
+    next_block = blocks[math.random(1, #blocks)]
     bs = #block
+
+    active_block.color = block.color
     
     for i=1, #block do
         for j=1, #block do
@@ -264,33 +266,33 @@ end
 
 function game:draw()
     -- Draw active block
-    love.graphics.setColor(0, 127, 255)
+    love.graphics.setColor(255, 255, 255)
     for _, i in ipairs(active_block) do
-        love.graphics.rectangle('fill', i[2]*SIZE, i[1]*SIZE, SIZE, SIZE)
+        love.graphics.rectangle('fill', i[2]*SIZE, (i[1]-2)*SIZE, SIZE, SIZE)
     end
 
-    love.graphics.setColor(255, 255, 255)
+
     -- Draw field
     for i=1, HEIGHT do
         for j=1, 10 do
-            if field[i][j] == 1 then
-                love.graphics.rectangle('fill', j*SIZE, i*SIZE, SIZE, SIZE)
+            if field[i][j] ~= 0 then
+                love.graphics.setColor(unpack(field[i][j]))
+                love.graphics.rectangle('fill', j*SIZE, (i-2)*SIZE, SIZE, SIZE)
             end
         end
     end
 
-    -- Draw frame
+    -- Draw tetrion
+    love.graphics.setColor(next_block.color)
     love.graphics.setLineWidth(SIZE)
     love.graphics.rectangle('line', SIZE/2, SIZE/2,
-                            WIDTH*SIZE+SIZE, HEIGHT*SIZE+SIZE)
-    love.graphics.rectangle('line', SIZE*1.5, SIZE*1.5,
-                            WIDTH*SIZE-SIZE, SIZE)
+                            WIDTH*SIZE+SIZE, HEIGHT*SIZE-SIZE)
 
     -- Draw info
-    love.graphics.setColor(55, 0, 0)
-    love.graphics.print('Score: ' .. score, 10, 700)
-    love.graphics.print('Level: ' .. current_level, 150, 700)
-    love.graphics.print('Rows: '  .. rows_destroyed, 300, 700)
+    love.graphics.setColor(0, 0, 0)
+    love.graphics.print('Score: ' .. score, 55, SIZE*(HEIGHT-0.6))
+    love.graphics.print('Level: ' .. current_level, 50 + SIZE*4, SIZE*(HEIGHT-0.6))
+    love.graphics.print('Rows: '  .. rows_destroyed, 42 + SIZE*8, SIZE*(HEIGHT-0.6))
 end
 
 function love.quit()
