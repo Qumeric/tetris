@@ -5,44 +5,32 @@ require 'helpers'
 Gamestate = require 'gamestate'
 Timer = require 'timer'
 
--- Size of a block
 HEIGHT = 22
 WIDTH  = 10
 GRAVITY = true
-SPEED = 100 -- base speed  (actual depends on score)
-SIZE = 0   -- determined dynamically (in game:enter)
-DROP_TIME = 0.5 -- is seconds. Very high values ignored FIXME make stable
+DROP_TIME = 0.5 -- is seconds. Very high values ignored
 DOWN_SENS = 25
 
 local menu = {}
 local game = {}
 
-bs = 0 -- size of a block. Set in game:spawn()
-
--- Super Rotation System
+-- Each block must be non-empty square
 blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
           {{1, 0, 0}, {1, 1, 1}, {0, 0, 0}},
           {{0, 0, 1}, {1, 1, 1}, {0, 0, 0}},
-          {{1, 1}, {1, 1}}, -- FIXME not SRS (Wontfix?)
+          {{1, 1}, {1, 1}},
           {{0, 1, 1}, {1, 1, 0}, {0, 0, 0}},
           {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}},
           {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}}}
 
-blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}}} -- debug
+-- blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}}}
 
 levels = {{speed = 1, score_needed = 0}}
 
 
-local a = 0
-local b = 1
-
-for i=1.5, 10, 0.5 do
-    table.insert(levels, {speed = i, score_needed = (a + b) * 100})
-    a, b = b, a + b
+for i=1.5, 15.5, 0.5 do
+    table.insert(levels, {speed = i, score_needed = i * i * 120})
 end
-
-next_level = 1
-rows_destroyed = 0
 
 function love.update(dt)
     TEsound.cleanup()
@@ -74,23 +62,21 @@ function menu:keyreleased(key, code)
 end
 
 function game:enter()
+    math.randomseed(os.time())
+
     SIZE = math.floor(math.max( love.graphics.getHeight()/(HEIGHT+2),
                                 love.graphics.getWidth() /(WIDTH+2)))
     score = 0
-    field = {}
+    rows_destroyed = 0
+    current_level = 0
 
-    for i=1, HEIGHT do
-        field[i] = {}
-        for j=1, WIDTH do
-            field[i][j] = 0
-        end
-    end
-    
-    math.randomseed(os.time())
+    field = table.empty(WIDTH, HEIGHT)
 
-    Timer.addPeriodic(1/DOWN_SENS, function() game:softDrop() end)
+    fall_timer = Timer.new()
+    freeze_timer = Timer.new()
+    softdrop_timer = Timer.new()
 
-    dropped = true -- game is ready to drop next
+    softdrop_timer:addPeriodic(1/DOWN_SENS, function() game:softDrop() end)
 
     game:spawn()
 end
@@ -105,7 +91,7 @@ function game:softDrop()
     end
 end
 
-function game:hardDrop() -- FIXME
+function game:hardDrop()
     while true do
         local move_result = game:move(0, 1)
         if move_result.collision then
@@ -120,51 +106,49 @@ end
 function game:update(dt)
     local move_result = game:move(0, 1)
 
-    function _drop()
-        dropped = true
+    function _freeze()
+        freeze_timer_running = false
         if move_result.collision then
             for _, i in ipairs(active_block) do
                 field[i[1]][i[2]] = 1
             end
             TEsound.play('sounds/fall.wav')
+
+            local full_rows = game:fullrows()
+            if #full_rows > 0 then game:destroy(full_rows) end
+
             game:spawn()
         end
     end
 
     function _fall()
-        if not move_result.collision and
-           not love.keyboard.isDown('down') then
+        if not love.keyboard.isDown('down') then
             active_block = move_result.block
         end
     end
 
-    local full_rows = game:findrows(1)
-
-    if #full_rows > 0 then game:destroy(full_rows) end
-
-    if move_result.collision and dropped then
-        Timer.add(DROP_TIME, function() _drop() end)
-        dropped = false
+    if move_result.collision and not freeze_timer_running then
+        freeze_timer:add(DROP_TIME, function() _freeze() end)
+        freeze_timer_running = true
     end
 
-    if next_level <= #levels and score >= levels[next_level].score_needed  then
-        fall_timer = Timer.new()
-        fall_timer:addPeriodic(1/levels[next_level].speed, function() _fall() end)
-        next_level = next_level + 1
-        if next_level > 2 then TEsound.play('sounds/level_up.wav') end
+    if current_level < #levels and score >= levels[current_level+1].score_needed  then
+        if current_level > 0 then TEsound.play('sounds/level_up.wav') end
+        current_level = current_level + 1
+        fall_timer:clear()
+        fall_timer:addPeriodic(1/levels[current_level].speed, function() _fall() end)
     end
 
     fall_timer:update(dt)
+    freeze_timer:update(dt)
+    softdrop_timer:update(dt)
 end
 
--- FIXME 
-function game:findrows(row_type)
+function game:fullrows()
     local rows = {}
     for y=HEIGHT, 1, -1 do
         for x=1, WIDTH do
-            if field[y][x] ~= row_type then
-                if row_type == 0 then return rows else break end
-            end
+            if field[y][x] == 0 then break end
             if x == WIDTH then table.insert(rows, y) end
         end
     end
@@ -172,14 +156,6 @@ function game:findrows(row_type)
 end
 
 function game:destroy(rows)
-    function _shift(rs)
-        for y=math.max(unpack(rows)), 1+#rs, -1 do
-            for x=1, WIDTH do
-                field[y][x] = field[y-#rs][x]
-            end
-        end
-    end
-
     for _, y in ipairs(rows) do
         for x=1, WIDTH do
             field[y][x] = 0
@@ -187,13 +163,17 @@ function game:destroy(rows)
     end
 
     if GRAVITY then
-        _shift(rows)
-        local empty_rows = game:findrows(0)
-        _shift(empty_rows)
+        for i = #rows, 1, -1 do
+            for y=rows[i], 2, -1 do
+                for x=1, WIDTH do
+                    field[y][x] = field[y-1][x]
+                end
+            end
+        end
     end
 
     TEsound.play('sounds/destroy.wav')
-    score = score + (#rows * (#rows + 1) * 5) * (next_level - 1)
+    score = score + (#rows * (#rows + 1) * 5) * (current_level - 1)
     rows_destroyed = rows_destroyed + #rows
 end
 
@@ -227,33 +207,14 @@ function game:move(x, y)
 end
 
 function game:rotate(active_block)
-    local temp = table.empty(bs, bs)
-    local block = table.empty(bs, bs)
+    local new_block = table.deepcopy(active_block)
 
-    -- make temp square from active_block
-    for _, i in ipairs(active_block) do
-        temp[i[1]-active_block['y']][i[2]-active_block['x']] = 1
+    for _, i in ipairs(new_block) do
+        i[2], i[1] = i[1] - new_block.y + new_block.x,
+                     bs - i[2] + new_block.x + 1 + new_block.y
     end
 
-    -- rotate square by 90 degrees
-    for i=1, bs do
-        for j=1, bs do
-            block[j][bs-i+1] = temp[i][j]
-        end 
-    end
-
-    local rotated_block = {}
-    rotated_block['x'] = active_block['x']
-    rotated_block['y'] = active_block['y']
-    for i=1, bs do
-        for j=1, bs do
-            if block[i][j] == 1 then
-                table.insert(rotated_block, {i+active_block['y'], j+active_block['x']})
-            end
-        end
-    end
-
-    return rotated_block
+    return new_block
 end
 
 
@@ -302,8 +263,13 @@ end
 
 
 function game:draw()
+    -- Draw active block
+    love.graphics.setColor(0, 127, 255)
+    for _, i in ipairs(active_block) do
+        love.graphics.rectangle('fill', i[2]*SIZE, i[1]*SIZE, SIZE, SIZE)
+    end
+
     love.graphics.setColor(255, 255, 255)
-   
     -- Draw field
     for i=1, HEIGHT do
         for j=1, 10 do
@@ -313,14 +279,7 @@ function game:draw()
         end
     end
 
-    -- Draw active block
-    love.graphics.setColor(0, 127, 255)
-    for _, i in ipairs(active_block) do
-        love.graphics.rectangle('fill', i[2]*SIZE, i[1]*SIZE, SIZE, SIZE)
-    end
-
     -- Draw frame
-    love.graphics.setColor(200, 255, 225)
     love.graphics.setLineWidth(SIZE)
     love.graphics.rectangle('line', SIZE/2, SIZE/2,
                             WIDTH*SIZE+SIZE, HEIGHT*SIZE+SIZE)
@@ -330,7 +289,7 @@ function game:draw()
     -- Draw info
     love.graphics.setColor(55, 0, 0)
     love.graphics.print('Score: ' .. score, 10, 700)
-    love.graphics.print('Level: ' .. next_level - 1, 150, 700)
+    love.graphics.print('Level: ' .. current_level, 150, 700)
     love.graphics.print('Rows: '  .. rows_destroyed, 300, 700)
 end
 

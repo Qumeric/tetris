@@ -1,18 +1,17 @@
-function table.deepcopy(t) -- by github@MihailJP
-    if type(t) ~= "table" then return t end
-    local meta = getmetatable(t)
-    local target = {}
+-- Copy table and nested tables
+function table.deepcopy(t)
+    local t2 = {}
     for k, v in pairs(t) do
         if type(v) == "table" then
-        target[k] = table.deepcopy(v)
+            t2[k] = table.deepcopy(v)
         else
-            target[k] = v
+            t2[k] = v
         end
     end
-    setmetatable(target, meta)
-    return target
+    return t2
 end
 
+-- Create empty table with x columns and y rows
 function table.empty(x, y)
     t = {}
     for i=1, y do
@@ -22,14 +21,4 @@ function table.empty(x, y)
         end
     end
     return t
-end
-
-function table.twoDprint(t)
-    for i=1, #t do
-        print()
-        for j=1, #t[1] do
-            io.write(t[i][j])
-        end
-    end
-    print()
 end
