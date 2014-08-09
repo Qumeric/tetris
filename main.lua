@@ -1,4 +1,5 @@
 require 'SICK'
+require 'TEsound'
 require 'helpers'
 Gamestate = require 'gamestate'
 
@@ -6,22 +7,27 @@ Gamestate = require 'gamestate'
 HEIGHT = 22
 WIDTH  = 10
 GRAVITY = true
-SPEED = 75 -- base speed  (actual depends on score)
+SPEED = 100 -- base speed  (actual depends on score)
 SIZE = 0   -- determined dynamically (in game:enter)
-DOWN-MOD = 5 -- speed modifier when down arrow is pressed
+DROPTIME = 0.5 -- is seconds. Very high values ignored
 
 local menu = {}
 local game = {}
 
--- Blocks are squares
-blocks = {{{0, 0, 0, 0}, {1, 1, 1, 0}, {1, 0, 0, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {1, 1, 1, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {0, 0, 1, 1}, {0, 1, 1, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {1, 1, 0, 0}, {0, 1, 1, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {0, 1, 1, 0}, {0, 1, 1, 0}, {0, 0, 0, 0}},
-          {{0, 0, 0, 0}, {0, 1, 1, 1}, {0, 0, 0, 1}, {0, 0, 0, 0}}}
+bs = 0 -- size of a block. Set in game:spawn()
 
+-- Super Rotation System
+blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
+          {{1, 0, 0}, {1, 1, 1}, {0, 0, 0}},
+          {{0, 0, 1}, {1, 1, 1}, {0, 0, 0}},
+          {{1, 1}, {1, 1}}, -- FIXME not SRS (Wontfix?)
+          {{0, 1, 1}, {1, 1, 0}, {0, 0, 0}},
+          {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}},
+          {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}}}
+
+function love.update()
+    TEsound.cleanup()
+end
 
 function love.load()
     highscore.set('highscores', 10, 'bot', 100)
@@ -50,7 +56,6 @@ end
 function game:enter()
     SIZE = math.floor(math.max( love.graphics.getHeight()/(HEIGHT+2),
                                 love.graphics.getWidth() /(WIDTH+2)))
-
     score = 0
     field = {}
     just_collided = false
@@ -63,30 +68,33 @@ function game:enter()
     end
     
     math.randomseed(os.time())
-    game:spawn() -- FIXME
+    game:spawn()
 end
 
 dtotal = 0
 function game:update(dt)
     dtotal = dtotal + dt
+    local maxtotal = 100/(SPEED+score)
 
-    if dtotal > 100/(SPEED+score) then
-        dtotal = dtotal - 100/(SPEED+score)
+    local move_result = game:move(0, 1)
 
-        local next_block = table.deepcopy(active_block)
+    if love.keyboard.isDown('down') then
+        active_block = move_result.block
+    end
 
-        for _, i in pairs(next_block) do
-             i[1] = i[1] + 1
+    if dtotal > math.min(DROPTIME, maxtotal) and move_result.collision == true then
+        for _, i in ipairs(active_block) do
+            field[i[1]][i[2]] = 1
         end
+        TEsound.play('sounds/fall.wav')
+        game:spawn()
+    end
 
-        if game:isColliding(next_block) then
-            for _, i in pairs(active_block) do
-                field[i[1]][i[2]] = 1
-            end
-            game:spawn()
-        else
-            active_block = next_block
-            block_y = block_y + 1
+    if dtotal > maxtotal then
+        dtotal = dtotal - maxtotal
+
+        if not move_result.collision then
+            active_block = move_result.block
         end
     end
 
@@ -112,10 +120,12 @@ function game:destroy(y)
         end
     end
 
+    TEsound.play('sounds/destroy.wav')
     score = score + 1
 end
 
 function game:isColliding(block)
+    just_collided = false
     for _, i in ipairs(block) do
         if i[1] > HEIGHT or field[i[1]][i[2]] == 1 or
            i[2] > WIDTH or i[2] <= 0 then
@@ -132,36 +142,42 @@ function game:move(x, y)
 
     for _, i in ipairs(block) do
         i[2] = i[2] + x
+        i[1] = i[1] + y
     end
 
-    if not game:isColliding(block) then
-        active_block = block
-        block_x = block_x + x
+    block['x'] = active_block['x'] + x
+    block['y'] = active_block['y'] + y
+
+    if game:isColliding(block) then
+        return {block = active_block, collision = true}
+    else
+        return {block = block, collision = false}
     end
 end
 
 function game:rotate(active_block)
-    local n = #blocks[1]
-    local temp = table.empty(n, n)
-    local block = table.empty(n, n)
+    local temp = table.empty(bs, bs)
+    local block = table.empty(bs, bs)
 
     -- make temp square from active_block
-    for _, i in pairs(active_block) do
-        temp[i[1]-block_y][i[2]-block_x] = 1
+    for _, i in ipairs(active_block) do
+        temp[i[1]-active_block['y']][i[2]-active_block['x']] = 1
     end
 
     -- rotate square by 90 degrees
-    for i=1, n do
-        for j=1, n do
-            block[j][n-i+1] = temp[i][j]
+    for i=1, bs do
+        for j=1, bs do
+            block[j][bs-i+1] = temp[i][j]
         end 
     end
 
     local rotated_block = {}
-    for i=1, n do
-        for j=1, n do
+    rotated_block['x'] = active_block['x']
+    rotated_block['y'] = active_block['y']
+    for i=1, bs do
+        for j=1, bs do
             if block[i][j] == 1 then
-                table.insert(rotated_block, {i+block_y, j+block_x})
+                table.insert(rotated_block, {i+active_block['y'], j+active_block['x']})
             end
         end
     end
@@ -170,44 +186,31 @@ function game:rotate(active_block)
 end
 
 function game:keypressed(key, code)
-    if key == 'down' then
-        SPEED = SPEED * DOWN-MOD
-    elseif key == 'right' then
-        game:move(1, 0)
+    if key == 'right' then
+        active_block = game:move(1, 0).block
     elseif key == 'left' then
-        game:move(-1, 0)
+        active_block = game:move(-1, 0).block
     elseif key == 'up' then
         rotated_block = game:rotate(active_block)
 
         if not game:isColliding(rotated_block) then
             active_block = rotated_block
         end
-
-        -- DEBUG
-        table.twoDprint(block)
-    end
-end
-
-function game:keyreleased(key, code)
-    if key == 'down' then
-        SPEED = SPEED / DOWN-MOD
     end
 end
 
 function game:spawn()
-    block_x = 3
-    block_y = 0
-
     active_block = {}
+    active_block['x'] = 3
+    active_block['y'] = 0
  
     block = blocks[math.random(1, #blocks)]
+    bs = #block
     
     for i=1, #block do
         for j=1, #block do
             if block[i][j] == 1 then
                 if field[i][j+3] == 1 then
-                    highscore.add('player', score)
-                    score = 0
                     Gamestate.switch(menu)
                 else
                     table.insert(active_block, {i, j+3})
@@ -216,6 +219,13 @@ function game:spawn()
         end
     end
 end
+
+function game:leave()
+    highscore.add('player', score)
+    score = 0
+    TEsound.play('sounds/game_over.wav')
+end
+
 
 function game:draw()
     love.graphics.setColor(255, 255, 255)
@@ -229,23 +239,26 @@ function game:draw()
         end
     end
 
-    -- Draw frame
-    love.graphics.setColor(200, 255, 225)
-    love.graphics.setLineWidth(SIZE)
-    love.graphics.rectangle('line', SIZE/2, SIZE/2,
-                            WIDTH*SIZE+SIZE, HEIGHT*SIZE+SIZE)
-    
     -- Draw active block
     love.graphics.setColor(0, 127, 255)
     if just_collided then
         love.graphics.setColor(255, 0, 0)
         just_collided = false
     end
-    for _, i in pairs(active_block) do
+    for _, i in ipairs(active_block) do
         love.graphics.rectangle('fill', i[2]*SIZE, i[1]*SIZE, SIZE, SIZE)
     end
 
+    -- Draw frame
+    love.graphics.setColor(200, 255, 225)
+    love.graphics.setLineWidth(SIZE)
+    love.graphics.rectangle('line', SIZE/2, SIZE/2,
+                            WIDTH*SIZE+SIZE, HEIGHT*SIZE+SIZE)
+    love.graphics.rectangle('line', SIZE*1.5, SIZE*1.5,
+                            WIDTH*SIZE-SIZE, SIZE)
+
     -- Draw score
+    love.graphics.setColor(55, 0, 0)
     love.graphics.print('Score: ' .. score, 10, 700)
 end
 
