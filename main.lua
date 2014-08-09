@@ -1,7 +1,9 @@
 require 'SICK'
 require 'TEsound'
 require 'helpers'
+-- HUMP
 Gamestate = require 'gamestate'
+Timer = require 'timer'
 
 -- Size of a block
 HEIGHT = 22
@@ -9,7 +11,8 @@ WIDTH  = 10
 GRAVITY = true
 SPEED = 100 -- base speed  (actual depends on score)
 SIZE = 0   -- determined dynamically (in game:enter)
-DROPTIME = 0.5 -- is seconds. Very high values ignored
+DROP_TIME = 0.5 -- is seconds. Very high values ignored FIXME make stable
+DOWN_SENS = 25
 
 local menu = {}
 local game = {}
@@ -25,8 +28,23 @@ blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
           {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}},
           {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}}}
 
-function love.update()
+levels = {{speed = 1, score_needed = 0}}
+
+
+local a = 0
+local b = 1
+
+for i=1.5, 10, 0.5 do
+    table.insert(levels, {speed = i, score_needed = (a + b) * 100})
+    a, b = b, a + b
+end
+
+next_level = 1
+rows_destroyed = 0
+
+function love.update(dt)
     TEsound.cleanup()
+    Timer.update(dt)
 end
 
 function love.load()
@@ -58,7 +76,6 @@ function game:enter()
                                 love.graphics.getWidth() /(WIDTH+2)))
     score = 0
     field = {}
-    just_collided = false
 
     for i=1, HEIGHT do
         field[i] = {}
@@ -68,73 +85,100 @@ function game:enter()
     end
     
     math.randomseed(os.time())
+
+    Timer.addPeriodic(1/DOWN_SENS, function() game:softDrop() end)
+
+    dropped = true -- game is ready to drop next
+
     game:spawn()
 end
 
-dtotal = 0
-function game:update(dt)
-    dtotal = dtotal + dt
-    local maxtotal = 100/(SPEED+score)
-
+function game:softDrop()
     local move_result = game:move(0, 1)
-
     if love.keyboard.isDown('down') then
         active_block = move_result.block
-    end
-
-    if dtotal > math.min(DROPTIME, maxtotal) and move_result.collision == true then
-        for _, i in ipairs(active_block) do
-            field[i[1]][i[2]] = 1
-        end
-        TEsound.play('sounds/fall.wav')
-        game:spawn()
-    end
-
-    if dtotal > maxtotal then
-        dtotal = dtotal - maxtotal
-
         if not move_result.collision then
+            score = score + 1
+        end
+    end
+end
+
+function game:update(dt)
+    local move_result = game:move(0, 1)
+
+    function _drop()
+        dropped = true
+        if move_result.collision then
+            for _, i in ipairs(active_block) do
+                field[i[1]][i[2]] = 1
+            end
+            TEsound.play('sounds/fall.wav')
+            game:spawn()
+        end
+    end
+
+    function _fall()
+        if not move_result.collision and
+           not love.keyboard.isDown('down') then
             active_block = move_result.block
         end
     end
 
     -- Check for full rows
+    local full_rows = {}
     for y=HEIGHT, 1, -1 do
         for x=1, WIDTH do
             if field[y][x] == 0 then break end
-            if x == WIDTH then game:destroy(y) end
+            if x == WIDTH then table.insert(full_rows, y) end
         end
     end
+    if #full_rows > 0 then game:destroy(full_rows) end
+
+
+    if move_result.collision and dropped then
+        Timer.add(DROP_TIME, function() _drop() end)
+        dropped = false
+    end
+
+    if next_level <= #levels and score >= levels[next_level].score_needed  then
+        fall_timer = Timer.new()
+        fall_timer:addPeriodic(1/levels[next_level].speed, function() _fall() end)
+        next_level = next_level + 1
+        if next_level > 2 then TEsound.play('sounds/level_up.wav') end
+    end
+
+    fall_timer:update(dt)
 end
 
-function game:destroy(y)
-    for x=1, WIDTH do
-        field[y][x] = 0
+function game:destroy(rows)
+    for _, y in ipairs(rows) do
+        for x=1, WIDTH do
+            field[y][x] = 0
+        end
     end
 
     if GRAVITY then
-        for y=y, 2, -1 do
+        for y=math.max(unpack(rows)), 1+#rows, -1 do
             for x=1, WIDTH do
-                field[y][x] = field[y-1][x]
+                field[y][x] = field[y-#rows][x]
             end
         end
     end
 
     TEsound.play('sounds/destroy.wav')
-    score = score + 1
+    score = score + (#rows * (#rows + 1) * 5) * (next_level - 1)
+    rows_destroyed = rows_destroyed + #rows
 end
 
 function game:isColliding(block)
-    just_collided = false
     for _, i in ipairs(block) do
         if i[1] > HEIGHT or field[i[1]][i[2]] == 1 or
            i[2] > WIDTH or i[2] <= 0 then
-            just_collided = true
-            break
+            return true
         end
     end
 
-    return just_collided
+    return false
 end
 
 function game:move(x, y)
@@ -185,8 +229,13 @@ function game:rotate(active_block)
     return rotated_block
 end
 
+function game:hardDrop() -- FIXME stub
+end
+
 function game:keypressed(key, code)
-    if key == 'right' then
+    if key == ' ' then
+        game:hardDrop()
+    elseif key == 'right' then
         active_block = game:move(1, 0).block
     elseif key == 'left' then
         active_block = game:move(-1, 0).block
@@ -241,10 +290,6 @@ function game:draw()
 
     -- Draw active block
     love.graphics.setColor(0, 127, 255)
-    if just_collided then
-        love.graphics.setColor(255, 0, 0)
-        just_collided = false
-    end
     for _, i in ipairs(active_block) do
         love.graphics.rectangle('fill', i[2]*SIZE, i[1]*SIZE, SIZE, SIZE)
     end
@@ -257,9 +302,11 @@ function game:draw()
     love.graphics.rectangle('line', SIZE*1.5, SIZE*1.5,
                             WIDTH*SIZE-SIZE, SIZE)
 
-    -- Draw score
+    -- Draw info
     love.graphics.setColor(55, 0, 0)
     love.graphics.print('Score: ' .. score, 10, 700)
+    love.graphics.print('Level: ' .. next_level - 1, 150, 700)
+    love.graphics.print('Rows: '  .. rows_destroyed, 300, 700)
 end
 
 function love.quit()
