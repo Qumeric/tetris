@@ -28,6 +28,8 @@ blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}},
           {{0, 1, 0}, {1, 1, 1}, {0, 0, 0}},
           {{1, 1, 0}, {0, 1, 1}, {0, 0, 0}}}
 
+blocks = {{{0, 0, 0, 0}, {1, 1, 1, 1}, {0, 0, 0, 0}, {0, 0, 0, 0}}} -- debug
+
 levels = {{speed = 1, score_needed = 0}}
 
 
@@ -103,6 +105,18 @@ function game:softDrop()
     end
 end
 
+function game:hardDrop() -- FIXME
+    while true do
+        local move_result = game:move(0, 1)
+        if move_result.collision then
+            break
+        else
+            active_block = move_result.block
+            score = score + 2
+        end
+    end
+end
+
 function game:update(dt)
     local move_result = game:move(0, 1)
 
@@ -124,16 +138,9 @@ function game:update(dt)
         end
     end
 
-    -- Check for full rows
-    local full_rows = {}
-    for y=HEIGHT, 1, -1 do
-        for x=1, WIDTH do
-            if field[y][x] == 0 then break end
-            if x == WIDTH then table.insert(full_rows, y) end
-        end
-    end
-    if #full_rows > 0 then game:destroy(full_rows) end
+    local full_rows = game:findrows(1)
 
+    if #full_rows > 0 then game:destroy(full_rows) end
 
     if move_result.collision and dropped then
         Timer.add(DROP_TIME, function() _drop() end)
@@ -150,7 +157,29 @@ function game:update(dt)
     fall_timer:update(dt)
 end
 
+-- FIXME 
+function game:findrows(row_type)
+    local rows = {}
+    for y=HEIGHT, 1, -1 do
+        for x=1, WIDTH do
+            if field[y][x] ~= row_type then
+                if row_type == 0 then return rows else break end
+            end
+            if x == WIDTH then table.insert(rows, y) end
+        end
+    end
+    return rows
+end
+
 function game:destroy(rows)
+    function _shift(rs)
+        for y=math.max(unpack(rows)), 1+#rs, -1 do
+            for x=1, WIDTH do
+                field[y][x] = field[y-#rs][x]
+            end
+        end
+    end
+
     for _, y in ipairs(rows) do
         for x=1, WIDTH do
             field[y][x] = 0
@@ -158,11 +187,9 @@ function game:destroy(rows)
     end
 
     if GRAVITY then
-        for y=math.max(unpack(rows)), 1+#rows, -1 do
-            for x=1, WIDTH do
-                field[y][x] = field[y-#rows][x]
-            end
-        end
+        _shift(rows)
+        local empty_rows = game:findrows(0)
+        _shift(empty_rows)
     end
 
     TEsound.play('sounds/destroy.wav')
@@ -229,8 +256,6 @@ function game:rotate(active_block)
     return rotated_block
 end
 
-function game:hardDrop() -- FIXME stub
-end
 
 function game:keypressed(key, code)
     if key == ' ' then
