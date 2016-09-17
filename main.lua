@@ -217,7 +217,7 @@ end
 
 
 function game:keypressed(key, code)
-    if key == ' ' then
+    if key == 'space' then
         game:hardDrop()
     elseif key == 'right' then
         active_block = game:move(1, 0).block
@@ -247,13 +247,22 @@ function game:spawn()
     for i=1, #block do
         for j=1, #block do
             if block[i][j] == 1 then
-                if field[i][j+3] == 1 then
-                    Gamestate.switch(menu)
-                else
-                    table.insert(active_block, {i, j+3})
-                end
+                table.insert(active_block, {i, j+3})
             end
         end
+    end
+
+    for col=1, WIDTH do
+        if field[1][col] ~= 0 then
+            Gamestate.switch(menu)
+        end
+    end
+
+    for i=1, HEIGHT do
+      for j=1, WIDTH do
+        io.write(field[i][j] ~= 0 and 1 or 0)
+      end
+      io.write('\n')
     end
 end
 
